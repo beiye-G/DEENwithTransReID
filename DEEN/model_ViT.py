@@ -501,8 +501,16 @@ class TransReID(nn.Module):
                 print('===========================ERROR=========================')
                 print('shape do not match in k :{}: param_dict{} vs self.state_dict(){}'.format(k, v.shape, self.state_dict()[k].shape))
             print('Load %d / %d layers.'%(count,len(self.state_dict().keys())))
+<<<<<<< HEAD
             print(len(param_dict))
             print(param_dict.keys())
+=======
+<<<<<<< HEAD
+            print(len(param_dict))
+            print(param_dict.keys())
+=======
+>>>>>>> 29d6827b63d280c3a914839346804bc0575ac1d7
+>>>>>>> 1b354c91c3e91978b58c560af1e7166baed925e8
 
 def resize_pos_embed(posemb, posemb_new, hight, width):
     # Rescale the grid of position embeddings when loading from state_dict. Adapted from

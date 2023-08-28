@@ -133,8 +133,17 @@ transform_llcm = transforms.Compose([
     transforms.ToPILImage(),
     transforms.Pad(10),
     # transforms.RandomGrayscale(p=0.5),
+<<<<<<< HEAD
     # transforms.RandomCrop((args.img_h, args.img_w)),
     transforms.Resize((args.img_h, args.img_w)),
+=======
+<<<<<<< HEAD
+    # transforms.RandomCrop((args.img_h, args.img_w)),
+    transforms.Resize((args.img_h, args.img_w)),
+=======
+    transforms.RandomCrop((args.img_h, args.img_w)),
+>>>>>>> 29d6827b63d280c3a914839346804bc0575ac1d7
+>>>>>>> 1b354c91c3e91978b58c560af1e7166baed925e8
     transforms.RandomHorizontalFlip(),
     transforms.ToTensor(),
     normalize,
