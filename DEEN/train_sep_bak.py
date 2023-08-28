@@ -122,8 +122,9 @@ transform_sysu = transforms.Compose([
 transform_regdb = transforms.Compose([
     transforms.ToPILImage(),
     transforms.Pad(10),
-    transforms.RandomGrayscale(p=0.5),
-    transforms.RandomCrop((args.img_h, args.img_w)),
+    # transforms.RandomGrayscale(p=0.5),
+    # transforms.RandomCrop((args.img_h, args.img_w)),
+    transforms.Resize((args.img_h, args.img_w)),
     transforms.RandomHorizontalFlip(),
     transforms.ToTensor(),
     normalize,
@@ -202,12 +203,16 @@ print('  ------------------------------')
 print('Data Loading Time:\t {:.3f}'.format(time.time() - end))
 
 print('==> Building model..')
-net = vit_base_patch16_224_TransReID(n_class, dataset)
+net_vis = vit_base_patch16_224_TransReID(n_class, dataset)
+net_the = vit_base_patch16_224_TransReID(n_class, dataset)
 
 
 # 加载预训练模型的参数
-net.load_param('/home/guohangyu/data/VIReID/DEENwithTransReID/DEEN/model/vit_base.pth')
-net.to(device)
+net_vis.load_param('/home/guohangyu/data/VIReID/DEENwithTransReID/DEEN/model/vit_base.pth')
+net_vis.to(device)
+
+net_the.load_param('/home/guohangyu/data/VIReID/DEENwithTransReID/DEEN/model/vit_base.pth')
+net_the.to(device)
 
 
 cudnn.benchmark = True
@@ -218,7 +223,19 @@ if len(args.resume) > 0:
         print('==> loading checkpoint {}'.format(args.resume))
         checkpoint = torch.load(model_path)
         start_epoch = 0 #checkpoint['epoch']
-        net.load_state_dict(checkpoint['net'])
+        net_vis.load_state_dict(checkpoint['net'])
+        print('==> loaded checkpoint {} (epoch {})'
+              .format(args.resume, checkpoint['epoch']))
+    else:
+        print('==> no checkpoint found at {}'.format(args.resume))
+
+if len(args.resume) > 0:
+    model_path = checkpoint_path + args.resume
+    if os.path.isfile(model_path):
+        print('==> loading checkpoint {}'.format(args.resume))
+        checkpoint = torch.load(model_path)
+        start_epoch = 0 #checkpoint['epoch']
+        net_the.load_state_dict(checkpoint['net'])
         print('==> loaded checkpoint {} (epoch {})'
               .format(args.resume, checkpoint['epoch']))
     else:
@@ -236,7 +253,19 @@ criterion_tri.to(device)
 criterion_cpm.to(device)
 
 if args.optim == 'sgd':
-    ignored_params =   list(map(id, net.bottleneck.parameters())) \
+    ignored_params_vis =   list(map(id, net_vis.bottleneck.parameters())) \
+                     + list(map(id, net_vis.classifier.parameters()))
+
+    base_params_vis = filter(lambda p: id(p) not in ignored_params_vis, net_vis.parameters())
+
+    optimizer_vis = optim.SGD([
+        {'params': base_params_vis, 'lr': 0.1 * args.lr},
+        {'params': net_vis.bottleneck.parameters(), 'lr': args.lr},
+        {'params': net_vis.classifier.parameters(), 'lr': args.lr}],
+        weight_decay=5e-4, momentum=0.9, nesterov=True)
+
+if args.optim == 'sgd':
+    ignored_params =   list(map(id, net_the.bottleneck.parameters())) \
                      + list(map(id, net.classifier.parameters()))
 
     base_params = filter(lambda p: id(p) not in ignored_params, net.parameters())

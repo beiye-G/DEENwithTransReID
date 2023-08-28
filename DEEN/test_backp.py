@@ -36,7 +36,7 @@ parser.add_argument('--margin', default=0.3, type=float, metavar='margin', help=
 parser.add_argument('--num_pos', default=4, type=int, help='num of pos per identity in each modality')
 parser.add_argument('--trial', default=1, type=int, metavar='t', help='trial (only for RegDB dataset)')
 parser.add_argument('--seed', default=0, type=int, metavar='t', help='random seed')
-parser.add_argument('--gpu', default='0', type=str, help='gpu device ids for CUDA_VISIBLE_DEVICES')
+parser.add_argument('--gpu', default='5', type=str, help='gpu device ids for CUDA_VISIBLE_DEVICES')
 parser.add_argument('--mode', default='all', type=str, help='all or indoor for sysu') # SYSU-MM01
 parser.add_argument('--tvsearch', default=True, help='whether thermal to visible search on RegDB') # RegDB
 

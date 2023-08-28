@@ -15,6 +15,7 @@ from data_manager import *
 from eval_metrics import eval_sysu, eval_regdb, eval_llcm
 from model import embed_net
 from model_ViT import TransReID, vit_base_patch16_224_TransReID, vit_small_patch16_224_TransReID, deit_small_patch16_224_TransReID
+from model_ViT_SEP import TransReID_SEP, vit_base_patch16_224_TransReID_SEP, vit_small_patch16_224_TransReID_SEP, deit_small_patch16_224_TransReID_SEP
 from utils import *
 from loss import OriTripletLoss, CPMLoss
 from tensorboardX import SummaryWriter
@@ -59,18 +60,21 @@ if dataset == 'sysu':
     data_path = '../Datasets/SYSU-MM01/'
     # data_path = '/home/guohangyu/data/datasets/SYSU-MM01'
     log_path = args.log_path + 'sysu_log/'
+    train_mode = [2, 1]
     test_mode = [1, 2]  # thermal to visible
     pool_dim = 768
 elif dataset == 'regdb':
     data_path = '../Datasets/RegDB/'
     # data_path = '/home/guohangyu/data/datasets/RegDB'
     log_path = args.log_path + 'regdb_log/'
+    train_mode = [2, 1]
     test_mode = [2, 1]  # visible to thermal
     pool_dim = 768
 elif dataset == 'llcm':
     data_path = '../Datasets/LLCM/'
     # data_path = '/home/guohangyu/data/datasets/LLCM/LLCM'
     log_path = args.log_path + 'llcm_log/'
+    train_mode = [2, 1]
     test_mode = [1, 2]  # [1, 2]: IR to VIS; [2, 1]: VIS to IR;
     pool_dim = 768
 
@@ -202,7 +206,7 @@ print('  ------------------------------')
 print('Data Loading Time:\t {:.3f}'.format(time.time() - end))
 
 print('==> Building model..')
-net = vit_base_patch16_224_TransReID(n_class, dataset)
+net = vit_base_patch16_224_TransReID_SEP(n_class, dataset)
 
 
 # 加载预训练模型的参数
@@ -295,9 +299,9 @@ def train(epoch):
 
         labels = Variable(labels.cuda())
         data_time.update(time.time() - end)
-
-        feat1, feat1_att, out1 = net(input1)
-        feat2, feat2_att, out2 = net(input2)
+        # model=1: visible, model=2: infrared 
+        feat1, feat1_att, out1 = net(input1, train_mode[0])
+        feat2, feat2_att, out2 = net(input2, train_mode[1])
         # print(net.training)
         # print(net)
 
@@ -321,15 +325,7 @@ def train(epoch):
         # measure elapsed time
         batch_time.update(time.time() - end)
         end = time.time()
-        # if batch_idx % 50 == 0:
-        #     print('Epoch: [{}][{}/{}] '
-        #           'Loss:{train_loss.val:.3f} '
-        #           'iLoss:{id_loss.val:.3f} '
-        #           'TLoss:{tri_loss.val:.3f} '
-        #           'CLoss:{cpm_loss.val:.3f} '
-        #           'OLoss:{ort_loss.val:.3f} '.format(
-        #         epoch, batch_idx, len(trainloader),
-        #         train_loss=train_loss, id_loss=id_loss, tri_loss=tri_loss, cpm_loss=cpm_loss, ort_loss=ort_loss))
+
         if batch_idx % 50 == 0:
             print('Epoch: [{}][{}/{}] '
                   'Loss:{train_loss.val:.3f} '
@@ -358,7 +354,7 @@ def test(epoch):
             batch_num = input.size(0)
             input = Variable(input.cuda())
             # feat, feat_att = net(input, input, test_mode[0])
-            feat, feat_att, out = net(input)
+            feat, feat_att, out = net(input, test_mode[0])
             gall_feat[ptr:ptr + batch_num, :] = feat.detach().cpu().numpy()
             gall_feat_att[ptr:ptr + batch_num, :] = feat_att.detach().cpu().numpy()
             ptr = ptr + batch_num
@@ -377,7 +373,7 @@ def test(epoch):
             batch_num = input.size(0)
             input = Variable(input.cuda())
             # feat, feat_att = net(input, input, test_mode[1])
-            feat, feat_att, out = net(input)
+            feat, feat_att, out = net(input, test_mode[1])
             query_feat[ptr:ptr + batch_num, :] = feat.detach().cpu().numpy()
             query_feat_att[ptr:ptr + batch_num, :] = feat_att.detach().cpu().numpy()
             ptr = ptr + batch_num

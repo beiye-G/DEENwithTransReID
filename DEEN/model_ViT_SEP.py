@@ -320,7 +320,7 @@ def weights_init_classifier(m):
             init.zeros_(m.bias.data)
 
 
-class TransReID(nn.Module):
+class TransReID_SEP(nn.Module):
     """ Transformer-based Object Re-Identification
     """
     def __init__(self, class_num, dataset, img_size=224, patch_size=16, stride_size=16, in_chans=3, num_classes=1000, embed_dim=768, depth=12,
@@ -347,26 +347,6 @@ class TransReID(nn.Module):
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim))
         
-        # self.cam_num = camera
-        # self.view_num = view
-        # self.sie_xishu = sie_xishu
-        # # Initialize SIE Embedding
-        # if camera > 1 and view > 1:
-        #     self.sie_embed = nn.Parameter(torch.zeros(camera * view, 1, embed_dim))
-        #     trunc_normal_(self.sie_embed, std=.02)
-        #     print('camera number is : {} and viewpoint number is : {}'.format(camera, view))
-        #     print('using SIE_Lambda is : {}'.format(sie_xishu))
-        # elif camera > 1:
-        #     self.sie_embed = nn.Parameter(torch.zeros(camera, 1, embed_dim))
-        #     trunc_normal_(self.sie_embed, std=.02)
-        #     print('camera number is : {}'.format(camera))
-        #     print('using SIE_Lambda is : {}'.format(sie_xishu))
-        # elif view > 1:
-        #     self.sie_embed = nn.Parameter(torch.zeros(view, 1, embed_dim))
-        #     trunc_normal_(self.sie_embed, std=.02)
-        #     print('viewpoint number is : {}'.format(view))
-        #     print('using SIE_Lambda is : {}'.format(sie_xishu))
-
         print('using drop_out rate is : {}'.format(drop_rate))
         print('using attn_drop_out rate is : {}'.format(attn_drop_rate))
         print('using drop_path rate is : {}'.format(drop_path_rate))
@@ -374,11 +354,29 @@ class TransReID(nn.Module):
         self.pos_drop = nn.Dropout(p=drop_rate)
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
 
+        # 分层层数
+        sep_depth = 4
+
+        # visible blocks
+        self.vis_blocks = nn.ModuleList([
+            Block(
+                dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
+                drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer)
+            for i in range(sep_depth)])
+        
+        #infrared blocks
+        self.inf_blocks = nn.ModuleList([
+            Block(
+                dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
+                drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer)
+            for i in range(sep_depth)])
+
+        #base blocks
         self.blocks = nn.ModuleList([
             Block(
                 dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
                 drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer)
-            for i in range(depth)])
+            for i in range(depth-sep_depth)])
 
         self.norm = norm_layer(embed_dim)
 
@@ -426,32 +424,35 @@ class TransReID(nn.Module):
         self.num_classes = num_classes
         self.fc = nn.Linear(self.embed_dim, num_classes) if num_classes > 0 else nn.Identity()
 
-    # def forward_features(self, x, camera_id, view_id):
-    def forward_features(self, x):
+    def forward_features(self, x, mode):
         B = x.shape[0]
         x = self.patch_embed(x)
 
         cls_tokens = self.cls_token.expand(B, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
         x = torch.cat((cls_tokens, x), dim=1)
 
-        # if self.cam_num > 0 and self.view_num > 0:
-        #     x = x + self.pos_embed + self.sie_xishu * self.sie_embed[camera_id * self.view_num + view_id]
-        # elif self.cam_num > 0:
-        #     x = x + self.pos_embed + self.sie_xishu * self.sie_embed[camera_id]
-        # elif self.view_num > 0:
-        #     x = x + self.pos_embed + self.sie_xishu * self.sie_embed[view_id]
-        # else:
-        #     x = x + self.pos_embed
         x = x + self.pos_embed
 
         x = self.pos_drop(x)
 
         if self.local_feature:
+            if mode == 1:
+                for blk in self.vis_blocks:
+                    x = blk(x)
+            elif mode == 2:
+                for blk in self.inf_blocks:
+                    x = blk(x)
             for blk in self.blocks[:-1]:
                 x = blk(x)
             return x
 
         else:
+            if mode == 1:
+                for blk in self.vis_blocks:
+                    x = blk(x)
+            elif mode == 2:
+                for blk in self.inf_blocks:
+                    x = blk(x)
             for blk in self.blocks:
                 x = blk(x)
 
@@ -464,12 +465,9 @@ class TransReID(nn.Module):
 
             # 返回cls_token 
             return x, x_att, out
-
-    # def forward(self, x, cam_label=None, view_label=None):
-    #     x = self.forward_features(x, cam_label, view_label)
-    #     return x
-    def forward(self, x):
-        x = self.forward_features(x)
+        
+    def forward(self, x, model):
+        x = self.forward_features(x, model)
         return x
 
     def load_param(self, model_path):
@@ -501,8 +499,8 @@ class TransReID(nn.Module):
                 print('===========================ERROR=========================')
                 print('shape do not match in k :{}: param_dict{} vs self.state_dict(){}'.format(k, v.shape, self.state_dict()[k].shape))
             print('Load %d / %d layers.'%(count,len(self.state_dict().keys())))
-            print(len(param_dict))
-            print(param_dict.keys())
+        print(len(param_dict))
+        print(param_dict.keys())
 
 def resize_pos_embed(posemb, posemb_new, hight, width):
     # Rescale the grid of position embeddings when loading from state_dict. Adapted from
@@ -521,8 +519,8 @@ def resize_pos_embed(posemb, posemb_new, hight, width):
     return posemb
 
 
-def vit_base_patch16_224_TransReID(class_num, dataset, img_size=(256, 128), stride_size=16, drop_rate=0.0, attn_drop_rate=0.0, drop_path_rate=0.1, camera=0, view=0,local_feature=False,sie_xishu=1.5, **kwargs):
-    model = TransReID(
+def vit_base_patch16_224_TransReID_SEP(class_num, dataset, img_size=(256, 128), stride_size=16, drop_rate=0.0, attn_drop_rate=0.0, drop_path_rate=0.1, camera=0, view=0,local_feature=False,sie_xishu=1.5, **kwargs):
+    model = TransReID_SEP(
         class_num=class_num, dataset=dataset, img_size=img_size, patch_size=16, stride_size=stride_size, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4, qkv_bias=True,\
         camera=camera, view=view, drop_path_rate=drop_path_rate, drop_rate=drop_rate, attn_drop_rate=attn_drop_rate,
         norm_layer=partial(nn.LayerNorm, eps=1e-6),  sie_xishu=sie_xishu, local_feature=local_feature, **kwargs)
@@ -530,47 +528,22 @@ def vit_base_patch16_224_TransReID(class_num, dataset, img_size=(256, 128), stri
     return model
 
 
-def vit_small_patch16_224_TransReID(img_size=(256, 128), stride_size=16, drop_rate=0., attn_drop_rate=0.,drop_path_rate=0.1, camera=0, view=0, local_feature=False, sie_xishu=1.5, **kwargs):
+def vit_small_patch16_224_TransReID_SEP(img_size=(256, 128), stride_size=16, drop_rate=0., attn_drop_rate=0.,drop_path_rate=0.1, camera=0, view=0, local_feature=False, sie_xishu=1.5, **kwargs):
     kwargs.setdefault('qk_scale', 768 ** -0.5)
-    model = TransReID(
+    model = TransReID_SEP(
         img_size=img_size, patch_size=16, stride_size=stride_size, embed_dim=768, depth=8, num_heads=8,  mlp_ratio=3., qkv_bias=False, drop_path_rate = drop_path_rate,\
         camera=camera, view=view,  drop_rate=drop_rate, attn_drop_rate=attn_drop_rate,
         norm_layer=partial(nn.LayerNorm, eps=1e-6),  sie_xishu=sie_xishu, local_feature=local_feature, **kwargs)
 
     return model
 
-def deit_small_patch16_224_TransReID(img_size=(256, 128), stride_size=16, drop_path_rate=0.1, drop_rate=0.0, attn_drop_rate=0.0, camera=0, view=0, local_feature=False, sie_xishu=1.5, **kwargs):
-    model = TransReID(
+def deit_small_patch16_224_TransReID_SEP(img_size=(256, 128), stride_size=16, drop_path_rate=0.1, drop_rate=0.0, attn_drop_rate=0.0, camera=0, view=0, local_feature=False, sie_xishu=1.5, **kwargs):
+    model = TransReID_SEP(
         img_size=img_size, patch_size=16, stride_size=stride_size, embed_dim=384, depth=12, num_heads=6, mlp_ratio=4, qkv_bias=True,
         drop_path_rate=drop_path_rate, drop_rate=drop_rate, attn_drop_rate=attn_drop_rate, camera=camera, view=view, sie_xishu=sie_xishu, local_feature=local_feature,
         norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
 
     return model
-
-# def vit_base_patch16_224_TransReID(img_size=(256, 128), stride_size=16, drop_rate=0.0, attn_drop_rate=0.0, drop_path_rate=0.1, local_feature=False, **kwargs):
-#     model = TransReID(
-#         img_size=img_size, patch_size=16, stride_size=stride_size, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4, qkv_bias=True,\
-#         drop_path_rate=drop_path_rate, drop_rate=drop_rate, attn_drop_rate=attn_drop_rate,
-#         norm_layer=partial(nn.LayerNorm, eps=1e-6), local_feature=local_feature, **kwargs)
-
-#     return model
-
-# def vit_small_patch16_224_TransReID(img_size=(256, 128), stride_size=16, drop_rate=0., attn_drop_rate=0.,drop_path_rate=0.1, local_feature=False, **kwargs):
-#     kwargs.setdefault('qk_scale', 768 ** -0.5)
-#     model = TransReID(
-#         img_size=img_size, patch_size=16, stride_size=stride_size, embed_dim=768, depth=8, num_heads=8,  mlp_ratio=3., qkv_bias=False, drop_path_rate = drop_path_rate,\
-#         drop_rate=drop_rate, attn_drop_rate=attn_drop_rate,
-#         norm_layer=partial(nn.LayerNorm, eps=1e-6), local_feature=local_feature, **kwargs)
-
-#     return model
-
-# def deit_small_patch16_224_TransReID(img_size=(256, 128), stride_size=16, drop_path_rate=0.1, drop_rate=0.0, attn_drop_rate=0.0, local_feature=False, **kwargs):
-#     model = TransReID(
-#         img_size=img_size, patch_size=16, stride_size=stride_size, embed_dim=384, depth=12, num_heads=6, mlp_ratio=4, qkv_bias=True,
-#         drop_path_rate=drop_path_rate, drop_rate=drop_rate, attn_drop_rate=attn_drop_rate, local_feature=local_feature,
-#         norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
-
-#     return model
 
 
 def _no_grad_trunc_normal_(tensor, mean, std, a, b):
